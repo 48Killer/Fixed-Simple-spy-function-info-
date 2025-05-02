@@ -36,7 +36,7 @@ local info = debug.info
 
 local IsA = game.IsA
 local tostring = tostring
-local tonumber = tonumberw
+local tonumber = tonumber
 local delay = task.delay
 local spawn = task.spawn
 local clear = table.clear
@@ -977,8 +977,7 @@ function newRemote(type, data)
 
     local log = {
         Name = remote.name,
-        Function = data.func or data.infofunc or "--Function Info is disabled",
-        targetFunc = data.func,
+        Function = data.infofunc or "--Function Info is disabled",
         Remote = remote,
         DebugId = data.id,
         metamethod = data.metamethod,
@@ -1669,7 +1668,6 @@ local function tablecheck(tabletocheck,instance,id)
 end
 
 function remoteHandler(data)
-
     if configs.autoblock then
         local id = data.id
 
@@ -1691,11 +1689,6 @@ function remoteHandler(data)
         end
         history[id].lastCall = tick()
     end
-
-    if data.targetFunc then
-        data.func = data.targetFunc
-    end
-
 
     if data.remote:IsA("RemoteEvent") and lower(data.method) == "fireserver" then
         newRemote("event", data)
@@ -1729,7 +1722,9 @@ local newindex = function(method,originalfunction,...)
                 args = nil
 
                 if configs.funcEnabled then
-                    data.infofunc = info(2,"f")
+                    pcall(function()
+                        data.infofunc = info(5,"f")
+                    end)
                     local calling = getcallingscript()
                     data.callingscript = calling and cloneref(calling) or nil
                 end
@@ -1765,23 +1760,6 @@ local newnamecall = newcclosure(function(...)
     local method = getnamecallmethod()
 
     if method and (method == "FireServer" or method == "fireServer" or method == "InvokeServer" or method == "invokeServer") then
-        local funcCandidates = {}
-        pcall(function()
-        for i = 2,5 do
-            local stack = debug.getinfo(i, "f")
-            if stack and stack.func then
-                if stack.func ~= newnamecall and islclosure(stack.func) then
-                    table.insert(funcCandidates, stack.func)
-                end
-            end
-        end
-    end)
-        dataTargetFunc = funcCandidates[#funcCandidates]
-        
-        if dataTargetFunc then
-            dataTargetFunc = clonefunction(dataTargetFunc)
-        end
-
         if typeof(...) == 'Instance' then
             local remote = cloneref(...)
 
@@ -1793,7 +1771,6 @@ local newnamecall = newcclosure(function(...)
 
                 if not tablecheck(blacklist,remote,id) and not IsCyclicTable(args) then
                     local data = {
-                        targetFunc = dataTargetFunc,
                         method = method,
                         remote = remote,
                         args = deepclone(args),
@@ -1807,7 +1784,9 @@ local newnamecall = newcclosure(function(...)
                     args = nil
 
                     if configs.funcEnabled then
-                        data.infofunc = info(2,"f")
+                    pcall(function()
+                        data.infofunc = info(5,"f")
+                    end)
                         local calling = getcallingscript()
                         data.callingscript = calling and cloneref(calling) or nil
                     end
@@ -2084,101 +2063,65 @@ newButton(
 )
 
 --- Decompiles the script that fired the remote and puts it in the code box
-newButton("Function Info", function() 
-    return "Click to view calling function information"
-end, function()
-    if selected and selected.targetFunc then
-        local func = selected.targetFunc
+newButton("Function Info",function() return "Click to view calling function information" end,
+function()
+    local func = selected and selected.Function
+    if func then
         local typeoffunc = typeof(func)
 
         if typeoffunc ~= 'string' then
-            local constants = {}
             codebox:setRaw("--[[Generating Function Info please wait]]")
             RunService.Heartbeat:Wait()
-
-            pcall(function()
-                if islclosure(func) then
-                    constants = debug.getconstants(func)
-                else
-                    constants = {"N/A - Not a Lua closure"}
-                end
-            end)
-
-            local SourceScript = rawget(getfenv(func), "script")
+            local lclosure = islclosure(func)
+            local SourceScript = rawget(getfenv(func),"script")
             local CallingScript = selected.Source or nil
             local info = {}
-
+            
             info = {
                 info = getinfo(func),
-                constants = constants,
+                constants = lclosure and deepclone(getconstants(func)) or "N/A --Lua Closure expected got C Closure",
                 upvalues = deepclone(getupvalues(func)),
                 script = {
-                    SourceScript = SourceScript or "nil",
+                    SourceScript = SourceScript or 'nil',
                     CallingScript = CallingScript or 'nil'
                 }
             }
-
+                    
             if configs.advancedinfo then
                 local Remote = selected.Remote
 
                 info["advancedinfo"] = {
                     Metamethod = selected.metamethod,
                     DebugId = {
-                        SourceScriptDebugId = SourceScript and typeof(SourceScript) == "Instance" and
-                            OldDebugId(SourceScript) or "N/A",
-                        CallingScriptDebugId = CallingScript and typeof(SourceScript) == "Instance" and
-                            OldDebugId(CallingScript) or "N/A",
+                        SourceScriptDebugId = SourceScript and typeof(SourceScript) == "Instance" and OldDebugId(SourceScript) or "N/A",
+                        CallingScriptDebugId = CallingScript and typeof(SourceScript) == "Instance" and OldDebugId(CallingScript) or "N/A",
                         RemoteDebugId = OldDebugId(Remote)
                     },
-                    Protos = getprotos(func) or "N/A --Lua Closure expected got C Closure"
+                    Protos = lclosure and getprotos(func) or "N/A --Lua Closure expected got C Closure"
                 }
 
                 if Remote:IsA("RemoteFunction") then
-                    local getcallback = getcallbackvalue or getcallbackmember
-                    info["advancedinfo"]["OnClientInvoke"] = (function()
-                        if not (getcallbackvalue or getcallbackmember and type(getcallbackvalue) == "function" or type(getcallbackmember) == "function") then
-                            return "N/A -- Missing getcallback function"
-                        end
-
-                        local success, result = pcall(function()
-                            return getcallback(Remote, "OnClientInvoke")
-                        end)
-
-                        if success then
-                            if result then
-                                return tostring(result) .. " --[[callback found]]"
-                            end
-                        else
-                            return "N/A -- callback has no value"
-                        end
-                    end)()
+                    info["advancedinfo"]["OnClientInvoke"] = getcallbackmember and (getcallbackmember(Remote,"OnClientInvoke") or "N/A") or "N/A --Missing function getcallbackmember"
                 elseif getconnections then
                     info["advancedinfo"]["OnClientEvents"] = {}
 
-                    for i, v in next, getconnections(Remote.OnClientEvent) do
+                    for i,v in next, getconnections(Remote.OnClientEvent) do
                         info["advancedinfo"]["OnClientEvents"][i] = {
                             Function = v.Function or "N/A",
-                            State = (v and typeof(v) == "table" and v.State) or "N/A"
+                            State = (v and typeof(v) == "table" and v.State) or "N/A" 
                         }
                     end
                 end
             end
-
             codebox:setRaw("--[[Converting table to string please wait]]")
-            selected.Function = v2v({
-                functionInfo = info
-            })
+            selected.Function = v2v({functionInfo = info})
         end
-
-        codebox:setRaw("-- Calling function info\n-- Generated by the SimpleSpy V3 serializer\n\n" .. selected.Function)
+        codebox:setRaw("-- Calling function info\n-- Generated by the SimpleSpy V3 serializer\n\n"..selected.Function)
         TextLabel.Text = "Done! Function info generated by the SimpleSpy V3 Serializer."
     else
         TextLabel.Text = "Error! Selected function was not found."
     end
-
-end)--fixed by 50
-
-
+end)
 
 --- Clears the Remote logs
 newButton(
